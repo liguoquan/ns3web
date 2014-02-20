@@ -216,45 +216,45 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 	
 	char* domain = ".dcs.gla.ac.uk";
 	char* local = "localhost";
-	//perror("here lol");
+	perror("here lol");
 	
 		
 	gethostname(currenthost, 1024);
-	//perror("gethostname");
+	perror("gethostname");
 	char* hostdomain;
-	//perror("here lol1");
-	//printf("%s current host\n", currenthost);
+	perror("here lol1");
+	printf("%s current host\n", currenthost);
 	char* p = currenthost;
-	//printf("%s    copied name", currenthost);
+	printf("%s    copied name", currenthost);
 	// Conversion to lower case.
 	// Taken from stack overflow: J.F. Sebastian
 	// https://stackoverflow.com/a/2661788
 	for ( ; *p; ++p) *p = tolower(*p);
 
-	//printf("%s current host\n", currenthost);
+	printf("%s current host\n", currenthost);
 	//strncat(hostdomain, domain, 64);
 	//printf("%sCURRENTHOSTLOL\n", );
 	//printf("%i\n", sizeof(reqline) / sizeof(reqline[]));
 	while(c < 50){ //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
-	//printf("%i\n", c);
+	printf("%i\n", c);
 	if ( strncmp(reqline[c], "Host: ", 6)==0 ){
-		//printf("%s\n", reqline[c]);	
+		printf("%s\n", reqline[c]);	
 		//h = strcpy(h, reqline[c]+6);
 		h = strdup(reqline[c]+6);	
 		//printf("%s\n", h);
 		host = strtok(h,":");
-		//printf("%s\n", host);
+		printf("%s\n", host);
 
 		hostdomain = strdup(host);
 		strncat(hostdomain, domain, 64);
-		//printf("%s    %s    %s      %s\n", local, host, hostdomain, currenthost);
-		//printf("%i   %i   %i\n", strcmp(currenthost, local), strcmp(currenthost, host), strcmp(currenthost, hostdomain));
+		printf("%s    %s    %s      %s\n", local, host, hostdomain, currenthost);
+		printf("%i   %i   %i\n", strcmp(currenthost, local), strcmp(currenthost, host), strcmp(currenthost, hostdomain));
 		if (strcmp(currenthost, local) != 0 && strcmp(currenthost, host) != 0 && strcmp(currenthost, hostdomain) !=0 && strcmp(host, "localhost") != 0) respond_400(fd); //need to remove last strcmp, figure out why it wont send http request when using the computer name
 		c = 50;
 		}
 	else c++;
 	}
-//perror("out of here");	
+perror("out of here");	
 
 }
 
