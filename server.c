@@ -1,0 +1,277 @@
+/*
+AUTHOR: Abhijeet Rastogi (http://www.google.com/profiles/abhijeet.1989)
+
+This is a very simple HTTP server. Default port is 10000 and ROOT for the server is your current working directory..
+
+You can provide command line arguments like:- $./a.aout -p [port] -r [path]
+
+for ex. 
+$./a.out -p 50000 -r /home/
+to start a server at port 50000 with root directory as "/home"
+
+$./a.out -r /home/shadyabhi
+starts the server at port 10000 with ROOT as /home/shadyabhi
+
+*/
+
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<sys/socket.h>
+#include<arpa/inet.h>
+#include<netdb.h>
+#include<signal.h>
+#include<fcntl.h>
+
+#define HEADER "HTTP/1.1 200 OK \r\n"
+#define CONNMAX 1000
+#define BYTES 1024
+#define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
+
+#define DOMAIN "dcs.gla.ac.uk"
+
+char *ROOT;
+int listenfd, clients[CONNMAX];
+void error(char *);
+void startServer(char *);
+void respond(int);
+void findHost(char *reqline[], int fd);
+
+int main(int argc, char* argv[])
+{
+    struct sockaddr_in clientaddr;
+    socklen_t addrlen;
+    char c;    
+    
+    //Default Values PATH = ~/ and PORT=10000
+    char PORT[6];
+    ROOT = getenv("PWD");
+    strcpy(PORT,"10000");
+
+    int slot=0;
+
+    //Parsing the command line arguments
+    while ((c = getopt (argc, argv, "p:r:")) != -1)
+        switch (c)
+        {
+            case 'r':
+                ROOT = malloc(strlen(optarg));
+                strcpy(ROOT,optarg);
+                break;
+            case 'p':
+                strcpy(PORT,optarg);
+                break;
+            case '?':
+                fprintf(stderr,"Wrong arguments given!!!\n");
+                exit(1);
+            default:
+                exit(1);
+        }
+    
+    printf("Server started at port no. %s%s%s with root directory as %s%s%s\n","\033[92m",PORT,"\033[0m","\033[92m",ROOT,"\033[0m");
+    // Setting all elements to -1: signifies there is no client connected
+    int i;
+    for (i=0; i<CONNMAX; i++)
+        clients[i]=-1;
+    startServer(PORT);
+
+    // ACCEPT connections
+    while (1) //wait for new connections
+    {
+        addrlen = sizeof(clientaddr);
+        clients[slot] = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
+
+        if (clients[slot]<0)
+            error ("accept() error"); //there was a problem accepting the connection
+        else
+        {
+            if ( fork()==0 ) //if new process is succesfully spawned
+            {
+                respond(slot); //client number is passed into respond function to deal with requests
+                exit(0);
+            }
+        }
+
+        while (clients[slot]!=-1) slot = (slot+1)%CONNMAX; //incriment the counter for the number of clients
+    }
+
+    return 0;
+}
+
+//start server
+void startServer(char *port) //alot of this is copied from my ns3 lab 1
+{
+    struct addrinfo hints, *res, *p;
+
+    // getaddrinfo for host
+    memset (&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+    if (getaddrinfo( NULL, port, &hints, &res) != 0)
+    {
+        perror ("getaddrinfo() error");
+        exit(1);
+    }
+    // socket and bind
+    for (p = res; p!=NULL; p=p->ai_next)
+    {
+	//int set = 1; //added
+        listenfd = socket (p->ai_family, p->ai_socktype, 0); //added
+	//setsockopt(listenfd,SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set));
+        if (listenfd == -1) continue;
+        if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0) break;
+    }
+    if (p==NULL)
+    {
+        perror ("socket() or bind()");
+        exit(1);
+    }
+
+    freeaddrinfo(res);
+
+    // listen for incoming connections
+    if ( listen (listenfd, 1000000) != 0 )
+    {
+        perror("listen() error");
+        exit(1);
+    }
+}
+
+void respond_400(int fd){
+	int error_Check;
+	error_Check = write(fd, "HTTP/1.0 400 Bad Request\n", 25);
+	if(error_Check<0){
+		fprintf(stderr, "Error writing response: 400\n");
+	}
+	perror("4000000000000000000 error\n\n\n");
+	close(fd);
+	return;
+}
+
+//client connection
+void respond(int n)
+{
+    char mesg[99999], *reqline[128], data_to_send[BYTES], path[99999];
+    int rcvd, fd, bytes_read;
+
+    memset( (void*)mesg, (int)'\0', 99999 );
+
+    rcvd=recv(clients[n], mesg, 99999, 0);
+
+    if (rcvd<0)    // receive error
+        fprintf(stderr,("recv() error\n")); //no request
+    else if (rcvd==0)    // receive socket closed
+        fprintf(stderr,"Client disconnected upexpectedly.\n");
+    else    // message received
+    {
+        printf("%s", mesg);
+        reqline[0] = strtok (mesg, " \t\n"); //part of the request that should be "GET"
+        if ( strncmp(reqline[0], "GET\0", 4)==0 )
+        {
+            reqline[1] = strtok (NULL, " \t"); //the file being requested
+            reqline[2] = strtok (NULL, " \t\n"); //the part of the request that should say "HTTP/1.1" or "HTTP/1.0"
+            if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 )
+            {
+                //write(clients[n], "HTTP/1.0 400 Bad Request\n", 25); //the request sent was not a valid HTTP request
+		respond_400(clients[n]);
+            }
+            else
+            {
+                if ( strncmp(reqline[1], "/\0", 2)==0 )
+                    reqline[1] = "/index.html";        //because if no file is specified, index.html will be opened by default
+
+
+		//printf("l0: %s\n", reqline[0]);
+		//("l1: %s\n", reqline[1]);
+		//printf("l2: %s\n", reqline[2]);
+		//printf("l3: %s\n", reqline[3]);
+		//printf("l4: %s\n", reqline[4]);
+		//printf("l5: %s\n", reqline[5]);
+		//printf("l6: %s\n", reqline[6]);
+		//printf("l7: %s\n", reqline[7]);
+		//printf("l1: %s\n", reqline[0]);
+                strcpy(path, ROOT);
+                strcpy(&path[strlen(ROOT)], reqline[1]);
+                printf("file: %s\n", path);
+
+		int counter = 0;
+		while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
+		findHost(reqline, clients[n]);
+		//printf("%i\n", temp);
+
+                if ( (fd=open(path, O_RDONLY))!=-1 )    //FILE FOUND
+                {
+			perror("file found");
+                    send(clients[n], "HTTP/1.0 200 OK\n\n", 17, 0);
+                    while ( (bytes_read=read(fd, data_to_send, BYTES))>0 )
+                        write (clients[n], data_to_send, bytes_read);
+                }
+                else    {
+			write(clients[n], ERROR404, strlen(ERROR404)); //FILE NOT FOUND
+			}
+            }
+        }
+    }
+
+    //Closing SOCKET
+    shutdown (clients[n], SHUT_RDWR);         //All further send and recieve operations are DISABLED...
+    close(clients[n]);
+    clients[n]=-1;
+}
+
+void findHost(char *reqline[], int fd){ //identifies the host header in the request, this is needed since im not assuming its in a static position
+	int c = 0;
+	char* h;
+	char* host;
+	char* currenthost = malloc(1024);
+	
+	char* domain = ".dcs.gla.ac.uk";
+	char* local = "localhost";
+	perror("here lol");
+	
+		
+	gethostname(currenthost, 1024);
+	perror("gethostname");
+	char* hostdomain;
+	perror("here lol1");
+	printf("%s current host\n", currenthost);
+	char* p = currenthost;
+	printf("%s    copied name", currenthost);
+	// Conversion to lower case.
+	// Taken from stack overflow: J.F. Sebastian
+	// https://stackoverflow.com/a/2661788
+	for ( ; *p; ++p) *p = tolower(*p);
+
+	printf("%s current host\n", currenthost);
+	//strncat(hostdomain, domain, 64);
+	//printf("%sCURRENTHOSTLOL\n", );
+	//printf("%i\n", sizeof(reqline) / sizeof(reqline[]));
+	while(c < 50){ //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
+	printf("%i\n", c);
+	if ( strncmp(reqline[c], "Host: ", 6)==0 ){
+		printf("%s\n", reqline[c]);	
+		//h = strcpy(h, reqline[c]+6);
+		h = strdup(reqline[c]+6);	
+		//printf("%s\n", h);
+		host = strtok(h,":");
+		printf("%s\n", host);
+
+		hostdomain = strdup(host);
+		strncat(hostdomain, domain, 64);
+		printf("%s    %s    %s      %s\n", local, host, hostdomain, currenthost);
+		printf("%i   %i   %i\n", strcmp(currenthost, local), strcmp(currenthost, host), strcmp(currenthost, hostdomain));
+		if (strcmp(currenthost, local) != 0 && strcmp(currenthost, host) != 0 && strcmp(currenthost, hostdomain) !=0 && strcmp(host, "localhost") != 0) respond_400(fd); //need to remove last strcmp, figure out why it wont send http request when using the computer name
+		c = 50;
+		}
+	else c++;
+	}
+perror("out of here");	
+
+}
+
+
+
