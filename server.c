@@ -144,27 +144,22 @@ void response200(int client, char* reqline[], char path[], char data_to_send[]){
     char* type = findType(copy);
 	int counter = 0;
 	while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
-	findHost(reqline, client);
+	findHost(reqline, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
 //printf("%i\n", temp);
 
     if ( (fd=open(path, O_RDONLY))!=-1 ){    //FILE FOUND{
-		perror("file found");
 		fstat(fd, &fs);
-		perror("fstat ok");
-		//sprintf(bytesize, "%d", fs.st_size);
 		sprintf(contentlength, "Content-Length: %d\r\n\r\n", fs.st_size);
-		//perror("sprint ok");
-		//printf("\n%s BYTE SIZE\n", bytesize);
-		//strncat(contentlength, bytesize, 32);
-		//perror("concat ok");
-		//printf("\n\n\nTHIS IS THE CONTENTLENGTH\n%s", contentlength);
 
         send(client, "HTTP/1.0 200 OK\r\n", 17, 0);
         printf("HTTP/1.0 200 OK\r\n");
+
         send(client, "Connection: close\r\n", 19, 0);
         printf("Connection: close\r\n");
+
         send(client, type, sizeof(type), 0);
         printf("%s", type);
+
         send(client, contentlength, sizeof(contentlength), 0);
         printf("%s", contentlength);
         while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ){
@@ -232,16 +227,13 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 	
 	char* domain = ".dcs.gla.ac.uk";
 	char* local = "localhost";
-	//perror("here lol");
-	
 		
 	gethostname(currenthost, 1024);
-	//perror("gethostname");
+
 	char* hostdomain;
-	//perror("here lol1");
-	//printf("%s current host\n", currenthost);
+
 	char* p = currenthost;
-	//printf("%s    copied name", currenthost);
+
 	// Conversion to lower case.
 	// Taken from stack overflow: J.F. Sebastian
 	// https://stackoverflow.com/a/2661788
@@ -251,9 +243,11 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 	//strncat(hostdomain, domain, 64);
 	//printf("%sCURRENTHOSTLOL\n", );
 	//printf("%i\n", sizeof(reqline) / sizeof(reqline[]));
+
+	//while loop goes through each header looking for the Host header
 	while(c < 50){ //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
 	//printf("%i\n", c);
-	if ( strncmp(reqline[c], "Host: ", 6)==0 ){
+	if ( strncmp(reqline[c], "Host: ", 6)==0 ){ //finds the host header
 		//printf("%s\n", reqline[c]);	
 		//h = strcpy(h, reqline[c]+6);
 		h = strdup(reqline[c]+6);	
@@ -266,7 +260,7 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 		//printf("%s    %s    %s      %s\n", local, host, hostdomain, currenthost);
 		//printf("%i   %i   %i\n", strcmp(currenthost, local), strcmp(currenthost, host), strcmp(currenthost, hostdomain));
 		if (strcmp(currenthost, local) != 0 && strcmp(currenthost, host) != 0 && strcmp(currenthost, hostdomain) !=0 && strcmp(host, "localhost") != 0) response400(fd); //need to remove last strcmp, figure out why it wont send http request when using the computer name
-		c = 50;
+		c = 50; //makes it exit the loop
 		}
 	else c++;
 	}
@@ -278,7 +272,7 @@ char* findType(char *reqline){ //identifies the host header in the request, this
 	//char* p;
 	//p = strdup(reqline);
 	char * point;
-	char* extension = strtok_r(reqline+1, ".", &point);
+	char* extension = strtok_r(reqline+1, ".", &point); //this was previously strtok, but having multiple calls to different strtoks was not working, this fixes the issue
 	extension = strtok_r(NULL, ".", &point);
 
 	char * content_Type;
