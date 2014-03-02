@@ -131,28 +131,31 @@ void response200(int client, char* reqline[], char path[]){
     char data_to_send[BYTES];
 
     char * copy = malloc(strlen(reqline[1]) + 1); 
-	strcpy(copy, reqline[1]);
+    strcpy(copy, reqline[1]);
 
-	char* contentlength = malloc(1024);
+    char* contentlength = malloc(1024);
 
-	//char* bytesize = malloc(sizeof(int));
+    //char* bytesize = malloc(sizeof(int));
 
     char* type = findType(copy); //find content type
-	int counter = 0;
-	while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
-	findHost(reqline, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
+    int counter = 0;
+    while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
+    findHost(reqline, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
 
     if ( (fd=open(path, O_RDONLY))!=-1 ){    //FILE FOUND{
-		fstat(fd, &fs);
-		sprintf(contentlength, "Content-Length: %zu\r\n\r\n", fs.st_size); //creates string that is the content length header
+        perror("file found");
+        fstat(fd, &fs);
+        sprintf(contentlength, "Content-Length: %zu\r\n", fs.st_size); //creates string that is the content length header
 
-        write(client, "HTTP/1.0 200 OK\r\n", sizeof("HTTP/1.0 200 OK\r\n"));
+        write(client, "HTTP/1.0 200 OK\r\n", 17);
 
-        write(client, "Connection: close\r\n", sizeof("Connection: close\r\n"));
+        
         
         write(client, type, sizeof(type));
 
         write(client, contentlength, sizeof(contentlength));
+
+        write(client, "Connection: close\r\n\r\n", 21);
 
         printf("HTTP/1.0 200 OK\r\n");
         printf("Connection: close\r\n");
@@ -161,11 +164,11 @@ void response200(int client, char* reqline[], char path[]){
 
         while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ){
             perror("sent");
-           	write (client, data_to_send, bytes_read);}
+            write (client, data_to_send, bytes_read);}
     }
     else{
-		write(client, ERROR404, strlen(ERROR404)); //FILE NOT FOUND, 404 ERROR
-	}
+        write(client, ERROR404, strlen(ERROR404)); //FILE NOT FOUND, 404 ERROR
+    }
 }
 
 //client connection
