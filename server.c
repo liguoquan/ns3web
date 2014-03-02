@@ -1,14 +1,16 @@
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/stat.h>
-#include<sys/socket.h>
-#include<arpa/inet.h>
-#include<netdb.h>
-#include<signal.h>
-#include<fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <signal.h>
+#include <fcntl.h>
+
+#include <ctype.h>
 
 #define HEADER "HTTP/1.1 200 OK \r\n"
 #define CONNMAX 1000
@@ -23,7 +25,7 @@ void startServer(char *);
 void respond(int);
 void findHost(char *reqline[], int fd);
 char* findType(char *reqline);
-void response200(int fd, char* reqline[], char path[], char data_to_send[]);
+void response200(int fd, char* reqline[], char path[]);
 
 int main(int argc, char* argv[])
 {
@@ -112,18 +114,13 @@ void startServer(char *port) //alot of this is copied from my ns3 lab 1
 }
 
 void response400(int fd){
-	//int error_Check;
-	//error_Check = write(fd, "HTTP/1.0 400 Bad Request\n", 25);
-	//if(error_Check<0){
-	//	fprintf(stderr, "Error writing response: 400\n");
-	//}
-	//perror("4000000000000000000 error\n\n\n");
+
 	write(fd, ERROR400, sizeof(ERROR400));
 	//close(fd);
 	return;
 }
 
-void response200(int client, char* reqline[], char path[], char data_to_send[]){
+void response200(int client, char* reqline[], char path[]){
     int bytes_read, fd;
     strcpy(path, ROOT);
     strcpy(&path[strlen(ROOT)], reqline[1]);
@@ -131,39 +128,39 @@ void response200(int client, char* reqline[], char path[], char data_to_send[]){
 
     struct stat fs;
 
+    char data_to_send[BYTES];
+
     char * copy = malloc(strlen(reqline[1]) + 1); 
 	strcpy(copy, reqline[1]);
 
 	char* contentlength = malloc(1024);
-	//contentlength = "Content-length: ";
 
-	char* bytesize = malloc(sizeof(int));
+	//char* bytesize = malloc(sizeof(int));
 
-
-
-    char* type = findType(copy);
+    char* type = findType(copy); //find content type
 	int counter = 0;
 	while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
 	findHost(reqline, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
-//printf("%i\n", temp);
 
     if ( (fd=open(path, O_RDONLY))!=-1 ){    //FILE FOUND{
 		fstat(fd, &fs);
-		sprintf(contentlength, "Content-Length: %d\r\n\r\n", fs.st_size);
+		sprintf(contentlength, "Content-Length: %zu\r\n\r\n", fs.st_size); //creates string that is the content length header
 
-        send(client, "HTTP/1.0 200 OK\r\n", 17, 0);
+        write(client, "HTTP/1.0 200 OK\r\n", sizeof("HTTP/1.0 200 OK\r\n"));
+
+        write(client, "Connection: close\r\n", sizeof("Connection: close\r\n"));
+        
+        write(client, type, sizeof(type));
+
+        write(client, contentlength, sizeof(contentlength));
+
         printf("HTTP/1.0 200 OK\r\n");
-
-        send(client, "Connection: close\r\n", 19, 0);
         printf("Connection: close\r\n");
-
-        send(client, type, sizeof(type), 0);
         printf("%s", type);
-
-        send(client, contentlength, sizeof(contentlength), 0);
         printf("%s", contentlength);
+
         while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ){
-        	//perror("lololol");
+            perror("sent");
            	write (client, data_to_send, bytes_read);}
     }
     else{
@@ -173,8 +170,8 @@ void response200(int client, char* reqline[], char path[], char data_to_send[]){
 
 //client connection
 void respond(int n){
-	char mesg[99999], *reqline[128], data_to_send[BYTES], path[99999];
-	int rcvd, fd, bytes_read;
+	char mesg[99999], *reqline[128],  path[99999];
+	int rcvd;
 
     memset( (void*)mesg, (int)'\0', 99999 );
 
@@ -195,20 +192,15 @@ void respond(int n){
 
         else if ( strncmp(reqline[0], "GET\0", 4)==0 ){
             reqline[1] = strtok (NULL, " \t"); //the file being requested
-            //char* p = strdup(reqline[1]);
-           
-            //findType(copy);
-           // printf("\n\n\n\n%s\n\n\n\n", copy);
-			////////////////findType(reqline[1]);
+
             reqline[2] = strtok (NULL, " \t\n"); //the part of the request that should say "HTTP/1.1" or "HTTP/1.0"
             if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 ){
-                	//write(clients[n], "HTTP/1.0 400 Bad Request\n", 25); //the request sent was not a valid HTTP request
             	printf("\n\nreqline2 %s", reqline[2]);
 				response400(clients[n]);
             }
             else{
             	if ( strncmp(reqline[1], "/\0", 2)==0 ) reqline[1] = "/index.html"; //because if no file is specified, index.html will be opened by default
-            	response200(clients[n], reqline, path, data_to_send);                
+            	response200(clients[n], reqline, path);                
             	}
         	}
     	}
@@ -234,49 +226,30 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 
 	char* p = currenthost;
 
-	// Conversion to lower case.
-	// Taken from stack overflow: J.F. Sebastian
-	// https://stackoverflow.com/a/2661788
 	for ( ; *p; ++p) *p = tolower(*p);
 
-	//printf("%s current host\n", currenthost);
-	//strncat(hostdomain, domain, 64);
-	//printf("%sCURRENTHOSTLOL\n", );
-	//printf("%i\n", sizeof(reqline) / sizeof(reqline[]));
-
-	//while loop goes through each header looking for the Host header
 	while(c < 50){ //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
-	//printf("%i\n", c);
-	if ( strncmp(reqline[c], "Host: ", 6)==0 ){ //finds the host header
-		//printf("%s\n", reqline[c]);	
-		//h = strcpy(h, reqline[c]+6);
-		h = strdup(reqline[c]+6);	
-		//printf("%s\n", h);
-		host = strtok(h,":");
-		//printf("%s\n", host);
 
+	if ( strncmp(reqline[c], "Host: ", 6)==0 ){ //finds the host header
+
+		h = strdup(reqline[c]+6);	
+		host = strtok(h,":");
 		hostdomain = strdup(host);
 		strncat(hostdomain, domain, 64);
-		//printf("%s    %s    %s      %s\n", local, host, hostdomain, currenthost);
-		//printf("%i   %i   %i\n", strcmp(currenthost, local), strcmp(currenthost, host), strcmp(currenthost, hostdomain));
+
 		if (strcmp(currenthost, local) != 0 && strcmp(currenthost, host) != 0 && strcmp(currenthost, hostdomain) !=0 && strcmp(host, "localhost") != 0) response400(fd); //need to remove last strcmp, figure out why it wont send http request when using the computer name
 		c = 50; //makes it exit the loop
 		}
 	else c++;
 	}
-//perror("out of here");	
-
 }
 
 char* findType(char *reqline){ //identifies the host header in the request, this is needed since im not assuming its in a static position
-	//char* p;
-	//p = strdup(reqline);
 	char * point;
 	char* extension = strtok_r(reqline+1, ".", &point); //this was previously strtok, but having multiple calls to different strtoks was not working, this fixes the issue
 	extension = strtok_r(NULL, ".", &point);
 
 	char * content_Type;
-	char * response;
 
 	/* Get the correct "Content-Type: " message */
 	if(!strncmp(extension, "html", 4)){
@@ -298,6 +271,3 @@ char* findType(char *reqline){ //identifies the host header in the request, this
 	//printf("%s\n\n\n", content_Type);
 	return content_Type;
 }
-
-
-
