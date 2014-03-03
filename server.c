@@ -18,52 +18,47 @@
 #define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 217\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
 #define ERROR400 "HTTP/1.0 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 217\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
 
-char *ROOT; //get rid of this
-int listenfd, clients[CONNMAX]; //get rid of this, no globals!!!!!
+ //get rid of this
+ //get rid of this, no globals!!!!!
+
 void error(char *);
-void startServer(char *);
-void respond(int);
+int startServer(char *);
+void respond(int, char* ROOT, int clients[]);
 void findHost(char *reqline[], int fd);
 char* findType(char *reqline);
-void response200(int fd, char* reqline[], char path[]);
+void response200(int fd, char* reqline[], char path[], char* ROOT);
 
 int main(int argc, char* argv[])
 {
+    int listenfd, clients[CONNMAX];
+    char *ROOT;
     struct sockaddr_in clientaddr;
     socklen_t addrlen;
     char c;    
-    
+  
     //Default Values PATH = ~/ and PORT=10000
     char PORT[6];
     ROOT = getenv("PWD");
-    strcpy(PORT,"10000");
+    strcpy(PORT,"8001");
 
     int slot=0;
 
     //Parsing the command line arguments
     while ((c = getopt (argc, argv, "p:r:")) != -1)
-        switch (c)
-        {
-            case 'r':
-                ROOT = malloc(strlen(optarg));
-                strcpy(ROOT,optarg);
-                break;
+        switch (c)        {
             case 'p':
                 strcpy(PORT,optarg);
                 break;
-            case '?':
-                fprintf(stderr,"Wrong arguments given!!!\n");
-                exit(1);
             default:
                 exit(1);
         }
     
-    printf("Server started at port no. %s%s%s with root directory as %s%s%s\n","\033[92m",PORT,"\033[0m","\033[92m",ROOT,"\033[0m");
+    printf("Started server with port number: %s", PORT);
     // Setting all elements to -1: signifies there is no client connected
     int i;
     for (i=0; i<CONNMAX; i++)
         clients[i]=-1;
-    startServer(PORT);
+    listenfd = startServer(PORT);
 
     // ACCEPT connections
     while (1) //wait for new connections
@@ -77,7 +72,7 @@ int main(int argc, char* argv[])
         {
             if ( fork()==0 ) //if new process is succesfully spawned
             {
-                respond(slot); //client number is passed into respond function to deal with requests
+                respond(slot, ROOT, clients); //client number is passed into respond function to deal with requests
                 exit(0);
             }
         }
@@ -89,10 +84,10 @@ int main(int argc, char* argv[])
 }
 
 //start server
-void startServer(char *port) //alot of this is copied from my ns3 lab 1
+int startServer(char *port) //alot of this is copied from my ns3 lab 1
 {
+    int listenfd, portint;
 
-	int portint;
 	sscanf(port, "%d", &portint);
 	
 	int type = AF_INET6;
@@ -110,6 +105,7 @@ void startServer(char *port) //alot of this is copied from my ns3 lab 1
 
 	if (listen(listenfd, 1000000) == -1) perror("problem listening");
 
+    return listenfd;
     
 }
 
@@ -120,11 +116,11 @@ void response400(int fd){
 	return;
 }
 
-void response200(int client, char* reqline[], char path[]){
+void response200(int client, char* reqline[], char path[], char* ROOT){
     int bytes_read, fd;
     strcpy(path, ROOT);
     strcpy(&path[strlen(ROOT)], reqline[1]);
-    printf("file: %s\n", path);
+    printf("file requested: %s\r\n", path);
 
     struct stat fs;
 
@@ -149,8 +145,6 @@ void response200(int client, char* reqline[], char path[]){
 
         write(client, "HTTP/1.0 200 OK\r\n", 17);
 
-        
-        
         write(client, type, sizeof(type));
 
         write(client, contentlength, sizeof(contentlength));
@@ -162,17 +156,17 @@ void response200(int client, char* reqline[], char path[]){
         printf("%s", type);
         printf("%s", contentlength);
 
-        while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ){
-            perror("sent");
-            write (client, data_to_send, bytes_read);}
+        while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ) write (client, data_to_send, bytes_read);
+        free(copy);
+        free(contentlength);
     }
-    else{
-        write(client, ERROR404, strlen(ERROR404)); //FILE NOT FOUND, 404 ERROR
-    }
+
+    else write(client, ERROR404, strlen(ERROR404)); //FILE NOT FOUND, 404 ERROR
+
 }
 
 //client connection
-void respond(int n){
+void respond(int n, char* ROOT, int clients[]){
 	char mesg[99999], *reqline[128],  path[99999];
 	int rcvd;
 
@@ -203,7 +197,7 @@ void respond(int n){
             }
             else{
             	if ( strncmp(reqline[1], "/\0", 2)==0 ) reqline[1] = "/index.html"; //because if no file is specified, index.html will be opened by default
-            	response200(clients[n], reqline, path);                
+            	response200(clients[n], reqline, path, ROOT);                
             	}
         	}
     	}
@@ -242,6 +236,10 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 
 		if (strcmp(currenthost, local) != 0 && strcmp(currenthost, host) != 0 && strcmp(currenthost, hostdomain) !=0 && strcmp(host, "localhost") != 0) response400(fd); //need to remove last strcmp, figure out why it wont send http request when using the computer name
 		c = 50; //makes it exit the loop
+        free(h);
+        //free(host);
+        free(currenthost);
+        free(hostdomain);
 		}
 	else c++;
 	}
