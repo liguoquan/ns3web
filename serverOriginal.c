@@ -9,7 +9,6 @@
 #include <netdb.h>
 #include <signal.h>
 #include <fcntl.h>
-#include <pthread.h>
 
 #include <ctype.h>
 
@@ -19,74 +18,15 @@
 #define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 217\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
 #define ERROR400 "HTTP/1.0 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 217\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
 
-
-#include <unistd.h>
-#include <sys/syscall.h>
-
-
-
  //get rid of this
  //get rid of this, no globals!!!!!
 
 void error(char *);
-int startServer(char *);
+void startServer(char *port, int listenfd);
 void respond(int, char* ROOT, int clients[]);
 void findHost(char *reqline[], int fd);
 char* findType(char *reqline);
 void response200(int fd, char* reqline[], char path[], char* ROOT);
-void* pthread_run(void* args);
-void response400(int fd);
-
-void* pthread_run(void* args) {
-    char* ROOT = getenv("PWD");
-    int client = *( int* )args;
-    printf("%d request number", client);
-    pid_t tid = syscall(SYS_gettid);
-    printf("PID of this process: %d\n", tid);
-    char mesg[99999], *reqline[128],  path[99999];
-    int rcvd;
-
-    memset( (void*)mesg, (int)'\0', 99999 );
-
-    rcvd=recv(client, mesg, 99999, 0);
-    printf("\n%d     rcdf", rcvd);
-
-    if (rcvd<0)    // receive error
-        fprintf(stderr,("recv() error\n")); //no request
-    else if (rcvd==0)    // receive socket closed
-        fprintf(stderr,"Client disconnected upexpectedly.\n");
-    else{    // message received{
-        printf("%s", mesg);
-        reqline[0] = strtok (mesg, " \t\n"); //part of the request that should be "GET"
-
-        if ( strncmp(reqline[0], "GET\0", 4)!=0 ){
-            printf("\n\nreqline0 %s", reqline[0]);
-            response400(client);
-        }
-
-        else if ( strncmp(reqline[0], "GET\0", 4)==0 ){
-            reqline[1] = strtok (NULL, " \t"); //the file being requested
-
-            reqline[2] = strtok (NULL, " \t\n"); //the part of the request that should say "HTTP/1.1" or "HTTP/1.0"
-            if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 ){
-                printf("\n\nreqline2 %s", reqline[2]);
-                response400(client);
-            }
-            else{
-                if ( strncmp(reqline[1], "/\0", 2)==0 ) reqline[1] = "/index.html"; //because if no file is specified, index.html will be opened by default
-                response200(client, reqline, path, ROOT);                
-                }
-            }
-        }
-
-    //Closing SOCKET
-    shutdown (client, SHUT_RDWR);         //All further send and recieve operations are DISABLED...
-    close(client);
-    client=-1;
-
-    return 0;
-
-}
 
 int main(int argc, char* argv[])
 {
@@ -95,6 +35,9 @@ int main(int argc, char* argv[])
     struct sockaddr_in clientaddr;
     socklen_t addrlen;
     char c;    
+
+
+    listenfd = 0;
   
     //Default Values PATH = ~/ and PORT=10000
     char PORT[6];
@@ -119,7 +62,11 @@ int main(int argc, char* argv[])
     for (i=0; i<CONNMAX; i++)
         clients[i]=-1;
 
-    int portint;
+
+
+
+
+        int portint;
 
     sscanf(PORT, "%d", &portint);
     
@@ -138,38 +85,39 @@ int main(int argc, char* argv[])
 
     if (listen(listenfd, 1000000) == -1) perror("problem listening");
 
-    //listenfd = startServer(PORT);
+
+
+
+
+    //startServer(PORT, listenfd);
 
     // ACCEPT connections
     while (1) //wait for new connections
     {
         addrlen = sizeof(clientaddr);
-        slot = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
+        clients[slot] = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
 
-        if (slot <0)
+        if (clients[slot]<0)
             error ("accept() error"); //there was a problem accepting the connection
         else
         {
-
-                printf("%d request number", slot);
-               pthread_t thread;
-                pthread_create(&thread, NULL, pthread_run, (void*)&slot);
-                printf("thread created\n");
-               // respond(slot, ROOT, clients); //client number is passed into respond function to deal with requests
-                //exit(0);
-            
+            if ( fork()==0 ) //if new process is succesfully spawned
+            {
+                respond(slot, ROOT, clients); //client number is passed into respond function to deal with requests
+                exit(0);
+            }
         }
-       // close(slot);
-       // while (clients[slot]!=-1) slot = (slot+1)%CONNMAX; //incriment the counter for the number of clients
+
+        while (clients[slot]!=-1) slot = (slot+1)%CONNMAX; //incriment the counter for the number of clients
     }
 
     return 0;
 }
 
 //start server
-int startServer(char *port) //alot of this is copied from my ns3 lab 1
+void startServer(char *port, int listenfd) //alot of this is copied from my ns3 lab 1
 {
-    int listenfd, portint;
+    int portint;
 
 	sscanf(port, "%d", &portint);
 	
@@ -188,7 +136,6 @@ int startServer(char *port) //alot of this is copied from my ns3 lab 1
 
 	if (listen(listenfd, 1000000) == -1) perror("problem listening");
 
-    return listenfd;
     
 }
 
@@ -217,10 +164,6 @@ void response200(int client, char* reqline[], char path[], char* ROOT){
     //char* bytesize = malloc(sizeof(int));
 
     char* type = findType(copy); //find content type
-    if (type == NULL){
-        write(client, ERROR404, strlen(ERROR404));
-        close(client);
-    } 
     int counter = 0;
     while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
     findHost(reqline, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
@@ -238,10 +181,10 @@ void response200(int client, char* reqline[], char path[], char* ROOT){
 
         write(client, "Connection: close\r\n\r\n", 21);
 
-      //  printf("HTTP/1.0 200 OK\r\n");
-      //  printf("Connection: close\r\n");
-      //  printf("%s", type);
-     //   printf("%s", contentlength);
+        printf("HTTP/1.0 200 OK\r\n");
+        printf("Connection: close\r\n");
+        printf("%s", type);
+        printf("%s", contentlength);
 
         while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ) write (client, data_to_send, bytes_read);
         free(copy);
@@ -266,11 +209,11 @@ void respond(int n, char* ROOT, int clients[]){
     else if (rcvd==0)    // receive socket closed
        	fprintf(stderr,"Client disconnected upexpectedly.\n");
     else{    // message received{
-       // printf("%s", mesg);
+        printf("%s", mesg);
         reqline[0] = strtok (mesg, " \t\n"); //part of the request that should be "GET"
 
         if ( strncmp(reqline[0], "GET\0", 4)!=0 ){
-        	//printf("\n\nreqline0 %s", reqline[0]);
+        	printf("\n\nreqline0 %s", reqline[0]);
         	response400(clients[n]);
         }
 
@@ -279,7 +222,7 @@ void respond(int n, char* ROOT, int clients[]){
 
             reqline[2] = strtok (NULL, " \t\n"); //the part of the request that should say "HTTP/1.1" or "HTTP/1.0"
             if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 ){
-            	//printf("\n\nreqline2 %s", reqline[2]);
+            	printf("\n\nreqline2 %s", reqline[2]);
 				response400(clients[n]);
             }
             else{
@@ -335,15 +278,7 @@ void findHost(char *reqline[], int fd){ //identifies the host header in the requ
 char* findType(char *reqline){ //identifies the host header in the request, this is needed since im not assuming its in a static position
 	char * point;
 	char* extension = strtok_r(reqline+1, ".", &point); //this was previously strtok, but having multiple calls to different strtoks was not working, this fixes the issue
-	//printf("%s  extension   \n", extension);
-
-    int before = strlen(extension);
-
-    extension = strtok_r(NULL, ".", &point);
-   // int after = strlen(extension);
-   // printf("%s  extension   \n", extension);
-
-    if (extension == NULL) return NULL;
+	extension = strtok_r(NULL, ".", &point);
 
 	char * content_Type;
 
