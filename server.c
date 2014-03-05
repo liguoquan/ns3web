@@ -200,7 +200,7 @@ void response200(int client, char* reqline[], char path[], char* ROOT){
     char* type = findType(copy); //find content type
     if (type == NULL){
         write(client, ERROR404, strlen(ERROR404));
-        //close(client);
+        close(client);
     } 
     int counter = 0;
     while (reqline[counter] = strtok (NULL, "\r\n")) counter++;
