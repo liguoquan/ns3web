@@ -13,9 +13,10 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define BYTES 1024
-#define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 222\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 File Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
-#define ERROR400 "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 219\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 400 Bad Request </title>\r\n</head>\r\n<body>\r\n<p> 400 Not Found </p>\r\n</body>\r\n</html>\r\n"
+#define BUFFERSIZE 1024
+#define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 202\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 File Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
+#define ERROR400 "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 201\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 400 Bad Request </title>\r\n</head>\r\n<body>\r\n<p> 400 Bad Request </p>\r\n</body>\r\n</html>\r\n"
+#define ERROR500 "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\nContent-Length: 221\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 500 Internal Server Error </title>\r\n</head>\r\n<body>\r\n<p> 500 Internal Server Error </p>\r\n</body>\r\n</html>\r\n"
 
 void error(char *);
 void findHost(char *requestLine[], int fd);
@@ -23,6 +24,8 @@ char* findType(char *requestLine);
 void response200(int fd, char* requestLine[], char path[], char* ROOT);
 void* pthread_run(void* args);
 void response400(int fd);
+void response404(int fd);
+void response500(int fd);
 
 void* pthread_run(void* args) {
     char* ROOT = getenv("PWD");
@@ -32,10 +35,13 @@ void* pthread_run(void* args) {
     memset( (void*)mesg, (int)'\0', 99999 );
 
     int rcvd;
-    rcvd=recv(client, mesg, 99999, 0);
+    rcvd=recv(client, mesg, 99999, 0); //reads in entire request to a huge buffer, it wont overflow
 
-    if (rcvd<0)    // receive error
-        fprintf(stderr,("error with recv()\n")); //no request
+    if (rcvd<0){
+        printf(("error with recv()\n")); //no request
+        response400(client);
+    }    // receive error
+        
     else if (rcvd==0)    // receive socket closed
         fprintf(stderr,"unexpectant client disconnection\n");
     else{    // message received
@@ -142,6 +148,16 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+void response404(int fd){
+    write(fd, ERROR404, sizeof(ERROR404));
+    close(fd);
+}
+
+void response500(int fd){
+    write(fd, ERROR500, sizeof(ERROR500));
+    close(fd);
+}
+
 void response400(int fd){
 	write(fd, ERROR400, sizeof(ERROR400));
 	close(fd);
@@ -153,15 +169,16 @@ void response200(int client, char* requestLine[], char path[], char* ROOT){
     strcpy(path, ROOT);
     strcpy(&path[strlen(ROOT)], requestLine[1]);
 
-    printf("file requested: %s\r\n", path);
+    printf("File requested: %s\r\n", path);
 
     struct stat fs;
 
-    char data_to_send[BYTES]; //buffer to hold data being read in from file
+    char data_to_send[BUFFERSIZE]; //buffer to hold data being read in from file
 
     char * copy = calloc(1024,strlen(requestLine[1]) + 1); 
     if (copy == NULL){
         perror("CALLOC FAILED COPY IN RESPONSE200\n");
+        response500(client);
         close(client);
         free(copy);
         exit(1);
@@ -169,14 +186,14 @@ void response200(int client, char* requestLine[], char path[], char* ROOT){
     strcpy(copy, requestLine[1]); //holds a copy of the file request
 
     char* type = findType(copy); //find content type
-    if (type == NULL){
-        write(client, ERROR404, strlen(ERROR404));
-        close(client);
-    } 
+    //if (type == NULL){
+    //    response404(client);
+   // } 
 
     char* contentlength = calloc(1024,1024);
     if (contentlength == NULL){
         perror("CALLOC FAILED CONTENTLENGTH IN RESPONSE200\n");
+        response500(client);
         close(client);
         free(contentlength);
         free(copy);
@@ -193,24 +210,23 @@ void response200(int client, char* requestLine[], char path[], char* ROOT){
         fstat(fd, &fs);
         sprintf(contentlength, "Content-Length: %zu\r\n", fs.st_size); //creates string that is the content length header
 
+        //below I send (write) all the headers for the request. There is NO need to concat everything into one huge string, so I dont
         write(client, "HTTP/1.0 200 OK\r\n", 17);
-        write(client, type, sizeof(type));
-        write(client, contentlength, sizeof(contentlength));
-        write(client, "Connection: close\r\n\r\n", 21);
+        write(client, type, sizeof(type)); //content type
+        write(client, contentlength, sizeof(contentlength)); //content length
+        write(client, "Connection: close\r\n\r\n", 21); //connection close
 
-        while ( (bytes_read=read(fd, data_to_send, BYTES))>0 ) write (client, data_to_send, bytes_read);
+        while ( (bytes_read=read(fd, data_to_send, BUFFERSIZE))>0 ) write (client, data_to_send, bytes_read);
         free(copy);
         free(contentlength);
         close(fd);
+        close(client);
     }
-
     else{
-        write(client, ERROR404, strlen(ERROR404)); //FILE NOT FOUND, 404 ERROR
+        response404(client); //FILE NOT FOUND, 404 ERROR
         free(copy);
         free(contentlength);
     } 
-
-    close(client);
 }
 
 void findHost(char *requestLine[], int fd){ //identifies the host header in the request, this is needed since im not assuming its in a static position
@@ -220,6 +236,7 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
 	char* currenthost = calloc(1024, 1024);
 	if (currenthost == NULL){
         perror("CALLOC FAILED FINDHOST\n");
+
         exit(1);
     } 
 			
@@ -246,6 +263,11 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
         free(currenthost);
         free(requesthost);
 		}
+    else if(c == 50){ //if this happens then the request was too big (Over 50 headers)
+        response500(fd);
+        free(currenthost);
+        free(requesthost);
+    }
 	else c++;
 	}
 }
@@ -256,12 +278,12 @@ char* findType(char *requestLine){ //identifies the host header in the request, 
 
     extension = strtok_r(NULL, ".", &point);
 
-    if (extension == NULL) return NULL;
-
 	char * contentType;
 
 	//get the correct content-type
-	if(!strncmp(extension, "html", 4)){
+    if(extension == NULL){
+        contentType = "Content-Type: application/octet-stream\r\n"; //need to do this check first otherwise it caueses problems, allows files without an extension
+	}else if(!strncmp(extension, "html", 4)){
 		contentType = "Content-Type: text/html\r\n";
 	}else if(!strncmp(extension, "txt", 3)){
 		contentType = "Content-Type: text/plain\r\n";
