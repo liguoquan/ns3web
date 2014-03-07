@@ -36,7 +36,7 @@ void* pthread_run(void* args) {
     memset((void*)request, '\0', 65536);
 
     int rcvd;
-    rcvd = recv(client, request, 65536, 0); //reads in entire request to a huge buffer, it wont overflow
+    rcvd = read(client, request, 65536); //reads in entire request to a huge buffer, it wont overflow
 
     if (rcvd < 0){
         printf(("request is empty\n")); //no request
