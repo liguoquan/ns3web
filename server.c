@@ -114,7 +114,7 @@ int main(int argc, char* argv[])
     address.sin6_family = type;
     address.sin6_port = htons(portint);
 
-    if (bind(listenfd, (struct sockaddr *) &address, sizeof(address)) == -1){
+    if (bind(listenfd, (struct sockaddr *) &address, sizeof(address)) == -1){ //bind the socket to a port
         perror("problem binding");
         close(listenfd);
         return 0;
@@ -226,43 +226,39 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
 	int c = 0;
 	char* h;
 	char* requesthost;
-	char* currenthost = calloc(1024, 1024);
 
+	char* currenthost = calloc(1024, 1024);
 	if (currenthost == NULL){
-        perror("CALLOC FAILED FINDHOST\n");
+        perror("CALLOC FAILED IN FINDHOST\n");
         response500(fd);
     } 
 			
 	gethostname(currenthost, 1024);
 
-	char* p = currenthost;
-
-	for ( ; *p; ++p) *p = tolower(*p);
-
     //this while loop just loops through the headers to find the host header
     //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
 	while(c < 50){ 
 
-	if ( strncmp(requestLine[c], "Host: ", 6)==0 ){ //finds the host header
+    	if ( strncmp(requestLine[c], "Host: ", 6)==0 ){ //finds the host header
 
-		h = strdup(requestLine[c]+6); //gets the host from the request	
-		requesthost = strtok(h,":"); //split it by the semi colon to remove the port
+    		h = strdup(requestLine[c]+6); //gets the host from the request	
+    		requesthost = strtok(h,":"); //split it by the semi colon to remove the port
 
-		if (strcmp(requesthost, currenthost) != 0 && strcmp(requesthost, "localhost") != 0){
-            response400(fd);
-            close(fd);
-        } 
+    		if (strcmp(requesthost, currenthost) != 0 && strcmp(requesthost, "localhost") != 0){
+                response400(fd);
+                close(fd);
+            } 
 
-		c = 50; //makes it exit the loop 
-        free(currenthost);
-        free(requesthost);
-	}
-    else if(c == 50){ //if this happens then the request was too big (Over 50 headers)
-        response500(fd);
-        free(currenthost);
-        free(requesthost);
-    }
-	else c++;
+    		c = 50; //makes it exit the loop 
+            free(currenthost);
+            free(requesthost);
+    	}
+        else if(c == 50){ //if this happens then the request was too big (Over 50 headers)
+            response500(fd);
+            free(currenthost);
+            free(requesthost);
+        }
+    	else c++;
 	}
 }
 
@@ -278,21 +274,15 @@ char* findType(char *requestLine){ //identifies the host header in the request, 
     if(extension == NULL){
         contentType = "Content-Type: application/octet-stream\r\n"; //need to do this check first otherwise it caueses problems, allows files without an extension
 	}
-    else if(!strncmp(extension, "html", 4)){
+    else if(!strncmp(extension, "html", 4) || !strncmp(extension, "htm", 3)){
 		contentType = "Content-Type: text/html\r\n";
 	}
     else if(!strncmp(extension, "txt", 3)){
 		contentType = "Content-Type: text/plain\r\n";
 	}
-    else if(!strncmp(extension, "jpg", 3)){
+    else if(!strncmp(extension, "jpg", 3) || !strncmp(extension, "jpeg", 4)){
 		contentType = "Content-Type: image/jpeg\r\n";
 	}
-    else if(!strncmp(extension, "jpeg", 4)){
-		contentType = "Content-Type: image/jpeg\r\n";
-	}
-    else if(!strncmp(extension, "htm", 3)){
-        contentType = "Content-Type: text/html\r\n";
-    }
     else if(!strncmp(extension, "gif", 3)){
 		contentType = "Content-Type: image/gif\r\n";
 	}

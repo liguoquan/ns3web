@@ -1,4 +1,4 @@
-CFLAGS=-W -Wall -g -lpthread
+CFLAGS=-W -Wall -g -ggdb -lpthread
 
 all: server clean
 
