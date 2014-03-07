@@ -13,7 +13,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define BUFFERSIZE 1024
+#define BUFFERSIZE 512
 #define ERROR404 "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 202\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 404 File Not Found </title>\r\n</head>\r\n<body>\r\n<p> 404 Not Found </p>\r\n</body>\r\n</html>\r\n"
 #define ERROR400 "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 201\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 400 Bad Request </title>\r\n</head>\r\n<body>\r\n<p> 400 Bad Request </p>\r\n</body>\r\n</html>\r\n"
 #define ERROR500 "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\nContent-Length: 221\r\nConnection: close\r\n\r\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\"><html>\r\n<head>\r\n<title> 500 Internal Server Error </title>\r\n</head>\r\n<body>\r\n<p> 500 Internal Server Error </p>\r\n</body>\r\n</html>\r\n"
@@ -21,8 +21,9 @@
 void error(char *);
 void findHost(char *requestLine[], int fd);
 char* findType(char *requestLine);
-void response200(int fd, char* requestLine[], char path[], char* root);
+void response(int fd, char* requestLine[], char path[], char* root);
 void* pthread_run(void* args);
+void response200(int client, char* contentLength, char* copy, int filefd);
 void response400(int fd);
 void response404(int fd);
 void response500(int fd);
@@ -47,22 +48,22 @@ void* pthread_run(void* args) {
         printf("%s", request);
         requestLine[0] = strtok (request, " \r\n"); //part of the request that should be "GET"
 
-        if ( strncmp(requestLine[0], "GET\0", 4)==0 ){
+        if ( strncmp(requestLine[0], "GET\0", 4) == 0 ){
             requestLine[1] = strtok (NULL, " \r"); //the file being requested
             requestLine[2] = strtok (NULL, " \r\n"); //the part of the request that should say "HTTP/1.1"
             
-            if (strncmp( requestLine[2], "HTTP/1.1", 8)!=0){
+            if (strncmp( requestLine[2], "HTTP/1.1", 8) != 0){
                 response400(client);
             }
 
             else{
                 if (strncmp(requestLine[1], "/\0", 2) == 0) 
                     requestLine[1] = "/index.html"; //if no file is specified then index.html will be opened by default
-                    response200(client, requestLine, path, root); // go into response200                
+                    response(client, requestLine, path, root); // go into response                
                 }
             }
 
-        else if ( strncmp(requestLine[0], "GET\0", 4)!=0 ){
+        else if ( strncmp(requestLine[0], "GET\0", 4) !=0 ){
             response400(client);
         }
     }
@@ -142,6 +143,46 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+void response(int client, char* requestLine[], char path[], char* root){
+    
+    int filefd;
+    strcpy(path, root);
+    strcpy(&path[strlen(root)], requestLine[1]);
+
+    printf("File requested: %s\r\n", path);
+
+    char * copy = calloc(1024,strlen(requestLine[1]) + 1); 
+    if (copy == NULL){
+        perror("CALLOC FAILED COPY IN RESPONSE200\n");
+        response500(client);
+        close(client);
+        free(copy);
+    } 
+    strcpy(copy, requestLine[1]); //holds a copy of the file request
+
+    char* contentLength = calloc(1024,1024);
+    if (contentLength == NULL){
+        perror("CALLOC FAILED CONTENTLENGTH IN RESPONSE200\n");
+        response500(client);
+        close(client);
+        free(contentLength);
+        free(copy);
+    } 
+
+    int counter = 0;
+    while ( (requestLine[counter] = strtok (NULL, "\r\n")) ) counter++;
+    findHost(requestLine, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
+
+    if ( (filefd=open(path, O_RDONLY))!=-1 ){ //file is found
+        response200(client, contentLength, copy, filefd);
+    }
+    else{
+        response404(client); //otherwise file not found so send 404 error
+        free(copy);
+        free(contentLength);
+    } 
+}
+
 void response404(int fd){
     write(fd, ERROR404, sizeof(ERROR404));
     close(fd);
@@ -157,69 +198,31 @@ void response400(int fd){
 	close(fd);
 }
 
-/* this is a pretty busy method, and I may have been better having
-a general "response()" method which would then branch out into all
-of these different requests, but time is short */
-void response200(int client, char* requestLine[], char path[], char* root){
-    int bytes_read, fd;
-
-    strcpy(path, root);
-    strcpy(&path[strlen(root)], requestLine[1]);
-
-    printf("File requested: %s\r\n", path);
-
+void response200(int client, char* contentLength, char* copy, int filefd){
     struct stat fs;
-
+    int bytes_read;
     char dataToSend[BUFFERSIZE]; //buffer to hold data being read in from file
 
-    char * copy = calloc(1024,strlen(requestLine[1]) + 1); 
-    if (copy == NULL){
-        perror("CALLOC FAILED COPY IN RESPONSE200\n");
-        response500(client);
-        close(client);
-        free(copy);
-    } 
-    strcpy(copy, requestLine[1]); //holds a copy of the file request
+    printf("file found");
 
     char* type = findType(copy); //find content type
 
-    char* contentlength = calloc(1024,1024);
-    if (contentlength == NULL){
-        perror("CALLOC FAILED CONTENTLENGTH IN RESPONSE200\n");
-        response500(client);
-        close(client);
-        free(contentlength);
-        free(copy);
-    } 
+    fstat(filefd, &fs);
+    sprintf(contentLength, "Content-Length: %zu\r\n", fs.st_size); //creates string that is the content length header
 
-    int counter = 0;
-    while ( (requestLine[counter] = strtok (NULL, "\r\n")) ) counter++;
-    findHost(requestLine, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
+    //below I send (write) all the headers for the request. There is NO need to concat everything into one huge string, so I dont
+    write(client, "HTTP/1.1 200 OK\r\n", 17);
+    write(client, type, sizeof(type)); //content type
+    write(client, contentLength, sizeof(contentLength)); //content length
+    write(client, "Connection: close\r\n\r\n", 21); //connection close
 
-    if ( (fd=open(path, O_RDONLY))!=-1 ){ //file is found
-        printf("file found");
+    while ( (bytes_read=read(filefd, dataToSend, BUFFERSIZE)) > 0 ) write (client, dataToSend, bytes_read); //reading and writing the file in chunks of size BUFFERSIZE
 
-        fstat(fd, &fs);
-        sprintf(contentlength, "Content-Length: %zu\r\n", fs.st_size); //creates string that is the content length header
+    free(copy);
+    free(contentLength);
+    close(filefd);
+    close(client);
 
-        //below I send (write) all the headers for the request. There is NO need to concat everything into one huge string, so I dont
-        write(client, "HTTP/1.1 200 OK\r\n", 17);
-        write(client, type, sizeof(type)); //content type
-        write(client, contentlength, sizeof(contentlength)); //content length
-        write(client, "Connection: close\r\n\r\n", 21); //connection close
-
-        while ( (bytes_read=read(fd, dataToSend, BUFFERSIZE)) > 0 ) write (client, dataToSend, bytes_read); //reading and writing the file in chunks of size BUFFERSIZE
-
-        free(copy);
-        free(contentlength);
-        close(fd);
-        close(client);
-    }
-    else{
-        response404(client); //otherwise file not found so send 404 error
-        free(copy);
-        free(contentlength);
-    } 
 }
 
 void findHost(char *requestLine[], int fd){ //identifies the host header in the request, this is needed since im not assuming its in a static position
@@ -249,7 +252,7 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
                 close(fd);
             } 
 
-    		c = 50; //makes it exit the loop 
+    		c = 50; //makes it exit the loop because host was found
             free(currenthost);
             free(requesthost);
     	}
