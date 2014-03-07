@@ -21,89 +21,86 @@
 void error(char *);
 void findHost(char *requestLine[], int fd);
 char* findType(char *requestLine);
-void response200(int fd, char* requestLine[], char path[], char* ROOT);
+void response200(int fd, char* requestLine[], char path[], char* root);
 void* pthread_run(void* args);
 void response400(int fd);
 void response404(int fd);
 void response500(int fd);
 
 void* pthread_run(void* args) {
-    char* ROOT = getenv("PWD");
-    int client = *( int* )args;
+    char* root = getenv("PWD");
+    int client = *(int*)args;
 
-    char mesg[99999], *requestLine[512],  path[4096];
-    memset( (void*)mesg, (int)'\0', 99999 );
+    char request[65536], *requestLine[512],  path[4096];
+    memset((void*)request, '\0', 65536);
 
     int rcvd;
-    rcvd=recv(client, mesg, 99999, 0); //reads in entire request to a huge buffer, it wont overflow
+    rcvd = recv(client, request, 65536, 0); //reads in entire request to a huge buffer, it wont overflow
 
-    if (rcvd<0){
-        printf(("error with recv()\n")); //no request
+    if (rcvd < 0){
+        printf(("request is empty\n")); //no request
         response400(client);
     }    // receive error
         
-    else if (rcvd==0)    // receive socket closed
-        fprintf(stderr,"unexpectant client disconnection\n");
+    else if (rcvd == 0) printf("client disconnected unexpectedly\n"); // receive socket closed
     else{    // message received
-        printf("%s", mesg);
-        requestLine[0] = strtok (mesg, " \t\n"); //part of the request that should be "GET"
+        printf("%s", request);
+        requestLine[0] = strtok (request, " \r\n"); //part of the request that should be "GET"
 
-        if ( strncmp(requestLine[0], "GET\0", 4)!=0 ){
-            response400(client);
-        }
-
-        else if ( strncmp(requestLine[0], "GET\0", 4)==0 ){
-            requestLine[1] = strtok (NULL, " \t"); //the file being requested
-            requestLine[2] = strtok (NULL, " \t\n"); //the part of the request that should say "HTTP/1.1" or "HTTP/1.0"
+        if ( strncmp(requestLine[0], "GET\0", 4)==0 ){
+            requestLine[1] = strtok (NULL, " \r"); //the file being requested
+            requestLine[2] = strtok (NULL, " \r\n"); //the part of the request that should say "HTTP/1.1"
             
             if (strncmp( requestLine[2], "HTTP/1.1", 8)!=0){
                 response400(client);
             }
 
             else{
-                if (strncmp(requestLine[1], "/\0", 2) == 0) requestLine[1] = "/index.html"; //if no file is specified then index.html will be opened by default
-                    response200(client, requestLine, path, ROOT);                
+                if (strncmp(requestLine[1], "/\0", 2) == 0) 
+                    requestLine[1] = "/index.html"; //if no file is specified then index.html will be opened by default
+                    response200(client, requestLine, path, root); // go into response200                
                 }
             }
+
+        else if ( strncmp(requestLine[0], "GET\0", 4)!=0 ){
+            response400(client);
         }
+    }
 
-    
     close(client); //close the socket
-
     return 0;
-
 }
 
 int main(int argc, char* argv[])
 {
     int listenfd;
-    char *ROOT;
+    char *root;
     struct sockaddr_in clientaddr;
     socklen_t addrlen;
     char argument;    
   
     //default port is 8080 but can be changed with argument "-p PORTNO"
-    char PORT[6];
+    char port[6];
 
-    ROOT = getenv("PWD");
-    strcpy(PORT,"8080");
+    root = getenv("PWD");
+    strcpy(port,"8080");
 
     int slot=0;
 
     //get args
     while ((argument = getopt (argc, argv, "p:")) != -1)
-        switch (argument)        {
+        switch (argument){
             case 'p':
-                strcpy(PORT,optarg);
+                strcpy(port,optarg);
                 break;
             default:
                 exit(1);
         }
     
-    fprintf(stdout, "Started the server with port number: %s", PORT);
+    fprintf(stdout, "Started the server with port number: %s", port);
 
     int portint;
-    sscanf(PORT, "%d", &portint);
+    sscanf(port, "%d", &portint);
     
     int type = AF_INET6;
 
@@ -130,15 +127,12 @@ int main(int argc, char* argv[])
     } 
 
     //accept connections
-    while (1) //wait for new connections
-    {
+    while (1){ //wait for new connections
         addrlen = sizeof(clientaddr);
         slot = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
 
-        if (slot <0)
-            error ("accept() error"); //there was a problem accepting the connection
-        else
-        {
+        if (slot <0) error ("accept() error"); //there was a problem accepting the connection
+        else{
             pthread_t thread;
             pthread_create(&thread, NULL, pthread_run, (void*)&slot);           
         }
@@ -163,17 +157,20 @@ void response400(int fd){
 	close(fd);
 }
 
-void response200(int client, char* requestLine[], char path[], char* ROOT){
+/* this is a pretty busy method, and I may have been better having
+a general "response()" method which would then branch out into all
+of these different requests, but time is short */
+void response200(int client, char* requestLine[], char path[], char* root){
     int bytes_read, fd;
 
-    strcpy(path, ROOT);
-    strcpy(&path[strlen(ROOT)], requestLine[1]);
+    strcpy(path, root);
+    strcpy(&path[strlen(root)], requestLine[1]);
 
     printf("File requested: %s\r\n", path);
 
     struct stat fs;
 
-    char data_to_send[BUFFERSIZE]; //buffer to hold data being read in from file
+    char dataToSend[BUFFERSIZE]; //buffer to hold data being read in from file
 
     char * copy = calloc(1024,strlen(requestLine[1]) + 1); 
     if (copy == NULL){
@@ -181,14 +178,10 @@ void response200(int client, char* requestLine[], char path[], char* ROOT){
         response500(client);
         close(client);
         free(copy);
-        exit(1);
     } 
     strcpy(copy, requestLine[1]); //holds a copy of the file request
 
     char* type = findType(copy); //find content type
-    //if (type == NULL){
-    //    response404(client);
-   // } 
 
     char* contentlength = calloc(1024,1024);
     if (contentlength == NULL){
@@ -197,33 +190,33 @@ void response200(int client, char* requestLine[], char path[], char* ROOT){
         close(client);
         free(contentlength);
         free(copy);
-        exit(1);
     } 
 
     int counter = 0;
     while ( (requestLine[counter] = strtok (NULL, "\r\n")) ) counter++;
     findHost(requestLine, client); //method checks if host is valid, if it is, it returns to this method and continues, if not, the method calls to send a 400 error
 
-    if ( (fd=open(path, O_RDONLY))!=-1 ){    //FILE FOUND{
+    if ( (fd=open(path, O_RDONLY))!=-1 ){ //file is found
         printf("file found");
 
         fstat(fd, &fs);
         sprintf(contentlength, "Content-Length: %zu\r\n", fs.st_size); //creates string that is the content length header
 
         //below I send (write) all the headers for the request. There is NO need to concat everything into one huge string, so I dont
-        write(client, "HTTP/1.0 200 OK\r\n", 17);
+        write(client, "HTTP/1.1 200 OK\r\n", 17);
         write(client, type, sizeof(type)); //content type
         write(client, contentlength, sizeof(contentlength)); //content length
         write(client, "Connection: close\r\n\r\n", 21); //connection close
 
-        while ( (bytes_read=read(fd, data_to_send, BUFFERSIZE))>0 ) write (client, data_to_send, bytes_read);
+        while ( (bytes_read=read(fd, dataToSend, BUFFERSIZE)) > 0 ) write (client, dataToSend, bytes_read); //reading and writing the file in chunks of size BUFFERSIZE
+
         free(copy);
         free(contentlength);
         close(fd);
         close(client);
     }
     else{
-        response404(client); //FILE NOT FOUND, 404 ERROR
+        response404(client); //otherwise file not found so send 404 error
         free(copy);
         free(contentlength);
     } 
@@ -234,10 +227,10 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
 	char* h;
 	char* requesthost;
 	char* currenthost = calloc(1024, 1024);
+
 	if (currenthost == NULL){
         perror("CALLOC FAILED FINDHOST\n");
-
-        exit(1);
+        response500(fd);
     } 
 			
 	gethostname(currenthost, 1024);
@@ -247,7 +240,8 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
 	for ( ; *p; ++p) *p = tolower(*p);
 
     //this while loop just loops through the headers to find the host header
-	while(c < 50){ //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
+    //50 is arbitary, but there wont be more than 50 headers in a request so its an easy solution to a nonproblem
+	while(c < 50){ 
 
 	if ( strncmp(requestLine[c], "Host: ", 6)==0 ){ //finds the host header
 
@@ -262,7 +256,7 @@ void findHost(char *requestLine[], int fd){ //identifies the host header in the 
 		c = 50; //makes it exit the loop 
         free(currenthost);
         free(requesthost);
-		}
+	}
     else if(c == 50){ //if this happens then the request was too big (Over 50 headers)
         response500(fd);
         free(currenthost);
@@ -283,19 +277,26 @@ char* findType(char *requestLine){ //identifies the host header in the request, 
 	//get the correct content-type
     if(extension == NULL){
         contentType = "Content-Type: application/octet-stream\r\n"; //need to do this check first otherwise it caueses problems, allows files without an extension
-	}else if(!strncmp(extension, "html", 4)){
+	}
+    else if(!strncmp(extension, "html", 4)){
 		contentType = "Content-Type: text/html\r\n";
-	}else if(!strncmp(extension, "txt", 3)){
+	}
+    else if(!strncmp(extension, "txt", 3)){
 		contentType = "Content-Type: text/plain\r\n";
-	}else if(!strncmp(extension, "jpg", 3)){
+	}
+    else if(!strncmp(extension, "jpg", 3)){
 		contentType = "Content-Type: image/jpeg\r\n";
-	}else if(!strncmp(extension, "jpeg", 4)){
+	}
+    else if(!strncmp(extension, "jpeg", 4)){
 		contentType = "Content-Type: image/jpeg\r\n";
-	}else if(!strncmp(extension, "htm", 3)){
+	}
+    else if(!strncmp(extension, "htm", 3)){
         contentType = "Content-Type: text/html\r\n";
-    }else if(!strncmp(extension, "gif", 3)){
+    }
+    else if(!strncmp(extension, "gif", 3)){
 		contentType = "Content-Type: image/gif\r\n";
-	}else{
+	}
+    else{
 		contentType = "Content-Type: application/octet-stream\r\n";
 	}
 
